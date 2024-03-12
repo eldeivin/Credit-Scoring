@@ -1,0 +1,624 @@
+---
+title: "INTERNAL CREDIT SCORING"
+subtitle: "Project & Design"
+author: "by David Vargas"
+output: pdf_document
+fontsize: 11pt
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+  library(readxl)
+  library(tidyverse)
+  library(dplyr)
+  library(stargazer)
+  library(mlogit)
+  library(ROCR)
+  library(ggplot2)
+  library(rmarkdown)
+  library(ggpubr)
+  library(pROC)
+  library(DescTools)
+  library(ResourceSelection)
+  library(stargazer)
+
+DATOS <- read_excel("C:/Users/david/OneDrive/Documents/DAVID/FORMATOS/DATOS.xlsx" , sheet = "DATOS")
+options(scipen = 999)
+DATOS <- DATOS %>%
+  filter(`Codigo Tipo de Asociado` !=9) %>%   # filtrar quitando tipo de asociado 9 persona juridica
+  mutate(PERIODO = as.Date(PERIODO) , 
+         Sueldo = Sueldo/1000000 ,
+         `Total Aportes` = `Total Aportes`/1000000 ,
+         Monto = Monto/1000000 ,
+         `Saldo Capital` = `Saldo Capital`/1000000 ,
+         `Valor Cuota` = `Valor Cuota`/1000000) 
+
+
+```
+
+
+# Objetivos
+
+## Objetivo General
+
+Diseño, modelización e implementación de herramienta analítica de riesgo, calificación crediticia y medición de default, como eje derivable para el desarrollo y mejoramiento de herramientas analíticas y de simulación, optimizando el otorgamiento de crédito, a partir de la explotación de Big Data y Data Mining.
+
+## Objetivos especificos:
+
+* Dinamizar la analitica de datos aplicada al riesgo de default.
+* Determinar los principales factores del riesgo crediticio y financiero.
+* Optimización de oferta y demanda de crédito a través de la integración de analítica y modelización dinámica.
+* Estandarización de Big Data y Data Mining intraempresarial de clientes y del mercado financiero.
+* Perfeccionamiento en técnicas de visualización de datos automatizados a través de generación de Dashboards y proyecciones estadísticas.
+
+# Metodologia
+
+Implementacion base de datos de corte transversal y series de tiempo de asociados deudores para el periodo enero - octubre del 2022. Siguiendo con el proceso ETL. Se ha realizado la limpieza y modificicacion de la base de datos original para efectos del procesamiento en el software RStudio, teniendo en cuenta la relevancia de las variables para el presente analisis, por lo que la informacion a implementar, comparada con la base inicial, se ha estructurado en 36.192 datos/observaciones de periodicidad mensual acumulativa, constituida por 53 variables sociodemograficas y financieras.
+
+A partir del tipo de calificacion de riesgo para los tipos de obligaciones crediticias, en funcion de la altura demora (en dias), se presenta:
+
+
+```{r, echo=FALSE}
+CATEGORIA <- c("A" , "B" , "C" , "D" , "E")
+COMERCIAL <- c("0 - 30" , "31 - 90" , "91 - 180" , "181 - 360" , "> 360")
+CONSUMO <- c("0 - 30" , "31 - 60" , "61 - 90" , "91 - 180" , "> 180")
+VIVIENDA <- c("0 - 60" , "61 - 150" , "151 - 360" , "361 - 540" , "> 540")
+MICROCREDITO <- c("0 - 30" , "31 - 60" , "61 - 90" , "91 - 120" , "> 120")
+CALIFICACIONES <- data.frame(CATEGORIA , COMERCIAL , CONSUMO , VIVIENDA , MICROCREDITO)
+```
+
+```{r}
+CALIFICACIONES
+```
+
+```{r, echo=FALSE}
+
+DATOS %>%
+  filter(PERIODO == "2022-10-30") %>%
+  ggplot()+
+  aes(`Calificacion Credito`)+
+  geom_bar() +
+  facet_wrap(~`Forma de Pago`) +
+  geom_text(aes(label = after_stat(count)) , stat = 'count' , vjust = -0.5)+
+  labs(title = "Categoria de riesgo", subtitle = "A corte de octubre 2022" , x="Categoria", y="N° asociados")+
+  theme_light()
+
+DATOS %>%
+  filter(PERIODO == "2022-10-30") %>%
+  with(table(`Calificacion antes de Arrastre (Cierre)`))
+
+```
+
+
+En cuanto a la metodologia estadistica, se opta por un modelo de regresion logistico simple, donde se toma la calificacion establecida de la linea de consumo como la variable dependiente. Esta variable, que inicialmente es de tipo cualitativa (A, B, C, D, E) y correspondera a la explicativa del modelo, se transforma en variable dicotomica, tomando dos valores probabilisticos segun el tipo comportamiento de pago (0 y 1) , como se especifica:
+
+```{r, echo=FALSE}
+VALOR <- c("1" , "0")
+CATEGORIA <- c("A" , "B-C-D-E")
+COMPORTAMIENTO <- c("Bueno" , "Regular - Malo")
+`CRITERIOS DE TRANSFORMACION` <- data.frame(COMPORTAMIENTO , CATEGORIA , VALOR)
+```
+
+```{r}
+`CRITERIOS DE TRANSFORMACION`
+```
+
+En este caso, el valor "1" representa la probabilidad de buen comportamiento en el habito de pago, donde la obligacion no excede la altura de mora de 30 dias; y el valor "0" representa un regular o mal comportamiento en el pago de la obligacion, que es desde 31 dias en adelante.
+
+
+
+# Evidencia empirica 
+
+## Algunos datos sociodemograficos
+
+```{r , echo=FALSE , message=FALSE , warning=FALSE , fig.height=4}
+
+DATOS %>%
+  filter(PERIODO == "2022-10-30") %>%
+  ggplot() +
+  aes(x = `Total Aportes` , y = `Sueldo` , color = Sexo) +
+  geom_point() + 
+  geom_smooth(method = "lm")+
+  labs(x = "Aportes sociales (en millones)" , y = "Ingresos (en millones)" , 
+       title = "Propension al ahorro: Ingresos VS Aportes" , 
+       subtitle = "A corte octubre de 2022" ) +
+  scale_x_continuous(limits = c(0 , 30) , breaks = seq(0 , 30 , 5)) +
+  scale_y_continuous(limits = c(0 , 30) , breaks = seq(0 , 30 , 5))
+
+```
+
+```{r , echo=FALSE , message=FALSE , warning=FALSE , fig.height=4}
+
+DATOS %>%
+  filter(PERIODO == "2022-10-30") %>%
+  ggplot() + 
+  aes(x = Edad , y = Sueldo , fill= Sexo) +
+  geom_histogram(aes(y =..density..) , bins = 70 , position = 'identity' , alpha = 0.7) +
+    scale_x_continuous(breaks = seq(0 , 100 , 10)) +
+  labs(x = "Edad" , y = "Frec. Relativa" , 
+       title = "Distribucion del ingreso por edad y genero" ,
+       subtitle = "A corte octubre de 2022")
+
+```
+## Informacion financiera Y crediticia
+
+### Propension al monto de solicitud de credito
+
+```{r , echo=FALSE , message=FALSE , warning=FALSE , fig.height=4}
+
+DATOS %>%
+  filter(PERIODO == "2022-10-30") %>%
+  ggplot() + 
+  aes(Sueldo , Monto) +
+  geom_point(color = "grey25") +
+  geom_smooth(method = "lm") +
+  scale_x_continuous(limits = c(0,10)) +
+  scale_y_continuous(limits = c(0,200)) +
+  labs(x = "Ingresos (en millones)" , y = "Monto solicitado (en millones)" , 
+       title = "Propension del monto solicitado: por nivel de estudios" ,
+       subtitle = "A corte octubre de 2022") +
+  facet_wrap(~ `Nivel Estudios`)
+
+```
+
+```{r , echo=FALSE , message=FALSE , warning=FALSE , fig.height=4}
+
+DATOS %>%
+  filter(PERIODO == "2022-10-30") %>%
+  ggplot() + 
+  aes(Sueldo , Monto) +
+  geom_point(color = "grey25") +
+  geom_smooth(method = "lm") +
+  scale_x_continuous(limits = c(0,10)) +
+  scale_y_continuous(limits = c(0,200)) +
+  labs(x = "Ingresos (en millones)" , y = "Monto solicitado (en millones)" , 
+       title = "Propension del monto solicitado: por tipo de contrato laboral" ,
+       subtitle = "A corte octubre de 2022") +
+  facet_wrap(~ `Tipo de contrato`)
+
+```
+
+
+```{r , echo=FALSE , message=FALSE , warning=FALSE , fig.height=4}
+
+DATOS %>%
+  filter(PERIODO == "2022-10-30") %>%
+  ggplot() + 
+  aes(Sueldo , Monto) +
+  geom_point(color = "grey25") +
+  geom_smooth(method = "lm") +
+  scale_x_continuous(limits = c(0,10)) +
+  scale_y_continuous(limits = c(0,200)) +
+  labs(x = "Ingresos (en millones)" , y = "Monto solicitado (en millones)" , 
+       title = "Propension del monto solicitado: por ocupacion" ,
+       subtitle = "A corte octubre de 2022") +
+  facet_wrap(~ `Ocupacion`)
+
+```
+
+### Incidencia al impago
+
+```{r , echo=FALSE , message=FALSE , warning=FALSE , fig.height=4}
+
+DATOS %>%
+  filter(PERIODO == "2022-10-30") %>%
+  mutate(`Antiguedad laboral meses` = (`Antiguedad laboral dias`/30) ,
+         `Meses vencidos` = `Dias vencidos`/30) %>%
+  ggplot() + 
+  aes(`Antiguedad laboral meses` , `Meses vencidos`) +
+  geom_point(color = "grey25") +
+  geom_smooth(method = "glm") +
+  scale_x_continuous(limits = c(0,400)) +
+  scale_y_continuous(limits = c(0,60)) +
+  labs(x = "Antiguedad laboral (meses)" , y = "Altura mora (meses)" , 
+       title = "Incidencia de la antiguedad laboral sobre el impago : por tipo de contrato" ,
+       subtitle = "A corte octubre de 2022") +
+  facet_wrap(~ `Tipo de contrato`)
+
+```
+
+```{r , echo=FALSE , message=FALSE , warning=FALSE , fig.height=4}
+
+DATOS %>%
+  filter(PERIODO == "2022-10-30") %>%
+  mutate(`Meses vencidos` = `Dias vencidos`/30 ,
+         `Tasa Efectiva` = `Tasa Efectiva`*100) %>%
+  ggplot() + 
+  aes(`Meses vencidos` , `Tasa Efectiva`) +
+  geom_point(color = "grey30") +
+  geom_smooth(method = "lm") +
+  #scale_x_continuous(limits = c(0,400)) +
+  scale_y_continuous(limits = c(0,40)) +
+  labs(x ="Altura mora (meses)" , y = "% Tasa E.A." , 
+       title = "Sensibilidad a la tasa de interes: por ocupacion" ,
+       subtitle = "A corte octubre de 2022") +
+  facet_wrap(~ `Ocupacion` , scales = "free")
+
+```
+### Elasticidad precio de la demanda del credito
+
+```{r , echo=FALSE , message=FALSE , warning=FALSE , fig.height=4}
+
+DATOS %>%
+  mutate(`Tasa Efectiva` = `Tasa Efectiva`*100) %>%
+  ggplot() +
+  aes(x = Monto , y = `Tasa Efectiva` , color = `Forma de Pago`) +
+  geom_jitter() + 
+  geom_smooth(method = "lm" , color = "grey50") +
+  #scale_x_continuous(limits = c(0,400)) +
+  scale_y_continuous(limits = c(5,35)) +
+  labs(title = "Elasticidad precio de la demanda del credito" ,
+       subtitle = "Enero a octubre del 2022" ,
+       x="Monto (en millones)" , 
+       y="% Tasa Efectiva") +
+  facet_wrap(~ `Forma de Pago` , scales = "free" ) +
+  stat_regline_equation(label.x = 2 , label.y = 35)
+
+```
+
+
+```{r , echo=FALSE , message=FALSE , warning=FALSE , fig.height=4}
+
+DATOS %>%
+  mutate(`Tasa Efectiva` = `Tasa Efectiva`*100 ,
+         `Nombre de la Modalidad` = 
+                      case_when(`Nombre de la Modalidad` == 
+                                  "CREDI DESCUENTO SECTOR PUBLICO" ~ "SECTOR PUBLICO" ,
+                                `Nombre de la Modalidad` == 
+                                  "CREDI DESCUENTO SECTOR PUBLICO S < 600" ~ "SECTOR PUBLICO" ,
+                                `Nombre de la Modalidad` == 
+                                  "CREDI DESCUENTO SECTOR PUBLICO SC >=600 <=699" ~ "SECTOR PUBLICO" ,
+                                `Nombre de la Modalidad` == 
+                                  "CREDI DESCUENTO SECTOR PUBLICO S >= 700  <799" ~ "SECTOR PUBLICO" ,
+                                `Nombre de la Modalidad` == 
+                                  "CREDI DESCUENTO SECTOR PUBLICO S > 800" ~ "SECTOR PUBLICO" ,
+                                `Nombre de la Modalidad` == 
+                                  "COLPENSIONES SC < 600" ~ "COLPENSIONES" ,
+                                `Nombre de la Modalidad` == 
+                                  "COLPENSIONES SC >= 600  < 699" ~ "COLPENSIONES" ,
+                                `Nombre de la Modalidad` == 
+                                  "COLPENSIONES SC >= 700 < 799" ~ "COLPENSIONES" ,
+                                `Nombre de la Modalidad` == 
+                                  "COLPENSIONES SC > 800" ~ "COLPENSIONES" ,
+                                `Nombre de la Modalidad` == 
+                                  "CONVENIO LIBRANZA POLICIA SC < 600" ~ "CONVENIO POLICIA" ,
+                                `Nombre de la Modalidad` == 
+                                  "CONVENIO LIBRANZA POLICIA SC >=600  < 700" ~ "CONVENIO POLICIA" ,
+                                `Nombre de la Modalidad` == 
+                                  "CONVENIO LIBRANZA POLICIA SC >= 700 < 799" ~ "CONVENIO POLICIA" ,
+                                `Nombre de la Modalidad` == 
+                                  "CONVENIO LIBRANZA POLICIA SC > 800" ~ "CONVENIO POLICIA" ,
+                                `Nombre de la Modalidad` == 
+                                  "INPEC CARRERA SC < 600" ~ "CONVENIO INPEC" ,
+                                `Nombre de la Modalidad` == 
+                                  "INPEC CARRERA SC >= 700 < 799" ~ "CONVENIO INPEC" ,
+                                `Nombre de la Modalidad` == 
+                                  "CASUR < 800" ~ "CASUR" , 
+                                `Nombre de la Modalidad` == 
+                                  "CASUR SC >= 800" ~ "CASUR" ,
+                                `Nombre de la Modalidad` == 
+                                  "CREDI DESCUENTO CONVENIO GRUPOS" ~ "CONVENIO GRUPOS")) %>%
+  filter(`Nombre de la Modalidad` == c("SECTOR PUBLICO",
+                                       "COLPENSIONES",
+                                        "CONVENIO POLICIA",
+                                        "CONVENIO INPEC",
+                                        "CASUR",
+                                        "CONVENIO GRUPOS")) %>%
+  ggplot() +
+  aes(x = Monto , y = `Tasa Efectiva`) +
+  geom_jitter(color = "grey30") + 
+  geom_smooth(method = "lm") +
+  labs(title = "Elasticidad precio de la demanda: modalidades de libranza" ,
+       subtitle = "Enero a octubre del 2022" ,
+       x="Monto (en millones)" , 
+       y="% Tasa Efectiva") +
+  facet_wrap(~ `Nombre de la Modalidad` , scales = "free") +
+  stat_regline_equation(label.x = 0 , label.y = 30 , color = "blue4")
+
+```
+
+```{r , echo=FALSE , message=FALSE , warning=FALSE , fig.height=4}
+
+DATOS %>%
+  mutate(`Tasa Efectiva` = `Tasa Efectiva`*100 ,
+         `Nombre de la Modalidad` = 
+           case_when(`Nombre de la Modalidad` == 
+                       "CREDI CONSUMO" ~ "CREDI CONSUMO" ,
+                     `Nombre de la Modalidad` == 
+                       "FG CREDI CONSUMO" ~ "CREDI CONSUMO" ,
+                     `Nombre de la Modalidad` == 
+                       "CREDI INICIO" ~ "CREDI CONSUMO" ,
+                     `Nombre de la Modalidad` == 
+                       "FG CREDI INICIO" ~ "CREDI CONSUMO" ,
+                     `Nombre de la Modalidad` == 
+                       "CREDI VENTANILLA PLUS" ~ "VENTANILLA PLUS" ,
+                     `Nombre de la Modalidad` == 
+                       "CREDI VENTANILLA PLUS INICIO" ~ "VENTANILLA PLUS" ,
+                     `Nombre de la Modalidad` == 
+                       "FG CREDI VENTANILLA PLUS INICIO" ~ "VENTANILLA PLUS" ,
+                     `Nombre de la Modalidad` == 
+                       "FG CREDI VENTANILLA PLUS" ~ "VENTANILLA PLUS" ,
+                     `Nombre de la Modalidad` == 
+                       "CREDI SOCIAL ROTATIVO 1" ~ "CREDI SOCIAL" ,
+                     `Nombre de la Modalidad` == 
+                       "CREDI SOCIAL ROTATIVO 2" ~ "CREDI SOCIAL" ,
+                     `Nombre de la Modalidad` == 
+                       "CREDI SOCIAL ROTATIVO 3" ~ "CREDI SOCIAL" ,
+                     `Nombre de la Modalidad` == 
+                       "CREDI SOCIAL" ~ "CREDI SOCIAL" ,
+                     `Nombre de la Modalidad` == 
+                       "CREDIFLASH COMPRA CARTERA" ~ "COMPRA DE CARTERA" ,
+                     `Nombre de la Modalidad` == 
+                       "ROTATIVO EDUCATIVO I" ~ "CREDI FORMAR (1,2,3 Y ESP.)" ,
+                     `Nombre de la Modalidad` == 
+                       "ROTATIVO EDUCATIVO II" ~ "CREDI FORMAR (1,2,3 Y ESP.)" ,
+                     `Nombre de la Modalidad` == 
+                       "ROTATIVO EDUCATIVO III" ~ "CREDI FORMAR (1,2,3 Y ESP.)" ,
+                     `Nombre de la Modalidad` == 
+                       "CREDI FORMAR I" ~ "CREDI FORMAR (1,2,3 Y ESP.)" ,
+                     `Nombre de la Modalidad` == 
+                       "CREDI FORMAR II" ~ "CREDI FORMAR (1,2,3 Y ESP.)" ,
+                     `Nombre de la Modalidad` == 
+                       "CREDI FORMAR III" ~ "CREDI FORMAR (1,2,3 Y ESP.)" ,
+                     `Nombre de la Modalidad` == 
+                       "CREDI FORMAR ESPECIALIZACION Y POSGRADOS" ~ "CREDI FORMAR (1,2,3 Y ESP.)",
+                     `Nombre de la Modalidad` == 
+                       "Credi Flash 7x24 Tarjeta Visa Platino" ~ "TARJETA ROTATIVO" ,
+                     `Nombre de la Modalidad` == 
+                       "Credi Flash 7x24 Tarjeta Visa Dorada" ~ "TARJETA ROTATIVO" ,
+                     `Nombre de la Modalidad` == 
+                       "Credi Flash 7x24 Tarjeta Visa Diamante" ~ "TARJETA ROTATIVO" ,
+                     `Nombre de la Modalidad` == 
+                       "TJ DEBITO CREDI FLASH 7X24" ~ "TARJETA ROTATIVO" ,
+                     `Nombre de la Modalidad` == 
+                       "CREDI HOGAR" ~ "CREDI HOGAR Y GARANTIA" ,
+                     `Nombre de la Modalidad` == 
+                       "CREDI HOGAR NO VIS" ~ "CREDI HOGAR Y GARANTIA" ,
+                     `Nombre de la Modalidad` == 
+                       "CREDI CONSUMO  GARANTIA" ~ "CREDI HOGAR Y GARANTIA")) %>%
+  filter(`Nombre de la Modalidad` == c("CREDI CONSUMO",
+                                       "VENTANILLA PLUS",
+                                       "CREDI SOCIAL",
+                                       "COMPRA DE CARTERA",
+                                       "CREDI FORMAR (1,2,3 Y ESP.)",
+                                       "TARJETA ROTATIVO",
+                                       "CREDI HOGAR Y GARANTIA")) %>%
+  ggplot() +
+  aes(x = Monto , y = `Tasa Efectiva`) +
+  geom_jitter(color = "grey30") + 
+  geom_smooth(method = "lm") +
+  labs(title = "Elasticidad precio de la demanda: modalidades de ventanilla" ,
+       subtitle = "Enero a octubre del 2022" ,
+       x="Monto (en millones)" , 
+       y="% Tasa Efectiva") +
+  facet_wrap(~ `Nombre de la Modalidad` , scales = "free")
+
+
+```
+# Analitica de datos: 
+
+## Transformacion inicial
+
+Para este caso, se implementa un modelo Logit o de regresión logística, en el que la variable explicada corresponde al pago oportuno o inoportuno (1 o 0) que representa al Default, teniendo en cuenta la máxima altura de mora de la linea de consumo para una calificación de la categoría A. 
+
+Se realiza las transformaciones pertinentes para fines analíticos de los datos, convirtiendo en dicótomas a las variables explicativas originalmente categóricas: 
+    - Garantía:  1 = Con garantía real  |  0 = Sin garantía real
+    - Codeudor:  1 = Con codeudor  |  0 = Sin codeudor
+    - Sexo:  1 = Mujer  |  0 = Hombre
+    - Non Default  1 = Categoría A  |  0 = demás categorías
+
+
+```{r , echo=FALSE , message=FALSE , warning=FALSE , fig.height=4 ,  }
+
+#######  MODIFICACION DE BASE PARA ANALISIS ESTADISTICO  #########
+
+DATOS <- DATOS %>%
+  mutate(`% Cobertura de la Garantia (Cierre)` = 
+           ifelse(`% Cobertura de la Garantia (Cierre)` == 70 , 1 , 0)) %>%  
+  mutate(`Codeudor` =
+           ifelse(`Codeudor` == "SI" , 1 , 0 )) %>%  
+  mutate(`Forma de Pago` = as.factor(`Forma de Pago`)) %>%  
+  mutate(`Sexo` = ifelse(`Sexo` == "F" , 1 , 0)) %>%
+  mutate(`Non Default` = 
+           ifelse(`Calificacion antes de Arrastre (Cierre)`=="A",1,0))
+
+```
+
+## Modelo estadistico
+
+### Estimacion del mejor modelo
+
+El modelo estadístico inicial incluirá todas las variables que, según algunos supuestos financieros y teóricos iniciales, pueden explicar el Default de riesgo crediticio.
+  
+```{r , echo=FALSE , message=FALSE , warning=FALSE , fig.height=0.5}
+
+modelo_logistico_1 = glm(`Non Default` ~ 
+                           Monto + Codeudor + `% Cobertura de la Garantia (Cierre)` +
+                           Edad + Sueldo + `Antiguedad laboral dias` + `Antiguedad asociado dias` +
+                           Sexo + Num.Cuotas + `Dias vencidos` + Ocupacion + `Saldo Capital` +
+                           `Nivel Estudios` + `Estado civil` + `Tipo de contrato` +
+                           `Tasa Efectiva Colocacion` + `Total Aportes` + `Forma de Pago`,
+                         family = binomial() , data = DATOS %>% filter(PERIODO == "2022-10-30"))
+
+stargazer(modelo_logistico_1 , 
+          title = "Modelo 1: incluye todas las variables" ,
+          type = "text" , 
+          digits = 2  ,
+          covariate.labels=c("Monto" , "Codeudor" ,
+                             "Garantia" , "Edad" , "Ingresos" ,
+                             "Antiguedad laboral" , "Antiguedad asociado" ,
+                             "Sexo" , "Plazo" , "Altura mora"))
+
+```
+
+Según estos resultados, se evidencia la irrelevancia de algunas variables dentro del modelo, como lo es el estado civil y la ocupación, por lo que es pertinente eliminarlas del analisis, con el fin de mejorar la validez estadística de las demás variables, así como del modelo en conjunto. Entonces se estima un segundo modelo:
+
+```{r , echo=FALSE , message=FALSE , warning=FALSE , fig.height=4}
+
+modelo_logistico_2 = glm(`Non Default` ~ 
+                           Monto + Codeudor + `% Cobertura de la Garantia (Cierre)` +
+                           Edad + Sueldo + `Antiguedad laboral dias` + `Antiguedad asociado dias` +
+                           Sexo + Num.Cuotas + `Dias vencidos` + `Estado civil` + `Tipo de contrato` + `Saldo Capital` +
+                           `Tasa Efectiva Colocacion` + `Total Aportes` + `Forma de Pago`,
+                         family = binomial() , data = DATOS %>% filter(PERIODO == "2022-10-30"))
+
+stargazer(modelo_logistico_2 , 
+          title = "Modelo 2: sin nivel de estudio y ocupacion" , 
+          type = "text" , 
+          digits = 2  ,
+          covariate.labels=c("Monto" , "Codeudor" ,
+                             "Garantia" , "Edad" , "Ingresos" ,
+                             "Antiguedad laboral" , "Antiguedad asociado" ,
+                             "Sexo" , "Plazo" , "Altura mora"))
+
+```
+
+Hasta este punto, la significancia del Modelo 2 ha mejorado con respecto a la del Modelo 1; sin embargo aun se encuentran variables que no tienen un efecto importante, que para este caso son el estado civil y el tipo de contrato laboral. Teniendo en cuenta la evidencia empírica, ademas del efecto de cada una de estas variables de manera individual sobre el Default, se decide evaluar un modelo que incluya dos opciones de cada una de estas variables categóricas:
+
+  - ¿Contrato a termino indefinido?  1 = Si  |  0 = No (demás casos)
+  - ¿Es casado/a?  1 = Si  |  0 = No (demás casos)
+
+
+```{r , echo=FALSE , message=FALSE , warning=FALSE , fig.height=4}
+
+DATOS <- DATOS %>%
+  mutate(Casado =
+           ifelse(`Estado civil` == "Casado" , 1 , 0) ,
+         Divorciado =
+           ifelse(`Estado civil` == "Divorciado" , 1 , 0) ,
+         Separado =
+           ifelse(`Estado civil` == "Separado" , 1 , 0) ,
+         Soltero =
+           ifelse(`Estado civil` == "Soltero" , 1 , 0) ,
+         `Union libre` =
+           ifelse(`Estado civil` == "Union libre" , 1 , 0) ,
+         Viudo =
+           ifelse(`Estado civil` == "Viudo" , 1 , 0) ,
+         
+         `Obra Labor` =
+           ifelse(`Tipo de contrato` == "Obra Labor" , 1 , 0) ,
+         `Prestacion de servicios` =
+           ifelse(`Tipo de contrato` == "Prestacion de Servicios" , 1 , 0) ,
+         `Termino fijo` =
+           ifelse(`Tipo de contrato` == "Termino Fijo" , 1 , 0) ,
+         `Termino Indefinido` =
+           ifelse(`Tipo de contrato` == "Termino Indefinido" , 1 , 0))
+
+modelo_logistico_3 = glm(`Non Default` ~ 
+                           Monto + Codeudor + `% Cobertura de la Garantia (Cierre)` +
+                           Edad + Sueldo + `Antiguedad laboral dias` + `Antiguedad asociado dias` +
+                           Sexo + Num.Cuotas + `Dias vencidos` + `Termino Indefinido` + `Saldo Capital` +
+                           Casado + `Tasa Efectiva Colocacion` + `Total Aportes` + `Forma de Pago`,
+                         family = binomial() , data = DATOS %>% filter(PERIODO == "2022-10-30"))
+
+stargazer(modelo_logistico_3 , 
+          title = "Modelo 3: incluye dicotomas Termino indefinido y Casado" , 
+          type = "text" ,
+          digits = 2  ,
+          covariate.labels=c("Monto" , "Codeudor" ,
+                             "Garantia" , "Edad" , "Ingresos" ,
+                             "Antiguedad laboral" , "Antiguedad asociado" ,
+                             "Sexo" , "Plazo" , "Altura mora"))
+
+
+```
+
+El Modelo 3, en comparación con el Modelo 1 y 2, presenta un mejor nivel significativo de las variables en conjunto, así mismo como del nivel explicativo del modelo en general.
+
+
+### Interpretacion de coeficientes
+
+Los coeficientes de la regresión del modelo seleccionado no explican un efecto probabilistico sobre el Default, sin embargo el tipo de efecto si, sea positivo o negativo. Al tratarse de un modelo Logit, se debe realizar la transformación pertinente de los coeficientes de las variables, con el fin de determinar el efecto porcentual o el peso de cada variable. (El Exp(OR) mas alto, indica un mayor nivel explciativo de la variable dentro del modelo.
+
+```{r , echo=FALSE , message=FALSE , warning=FALSE , fig.height=4}
+
+`Modelo Scoring` =data.frame(round(exp(cbind(OR = coef(modelo_logistico_3) , confint(modelo_logistico_3))) , 4))
+`Modelo Scoring` %>%
+  mutate((`Peso %` = ifelse(OR>1 , ifelse(OR<=2 , (OR-1) , OR ) , (1/OR)-1)))
+
+
+```
+
+
+# Propuestas
+
+### 1. Implementacion Internal Credit Scoring
+
+### 2. Modificacion parametros estandar de validacion y analisis crediticio
+
+## 3. Modificacion lineas y modalidades de credito
+
+## 4. Optimizacion en la asignacion de productos crediticios potencialmente demandables (credit card)
+
+## 5. Optimizacion en parametros de garantia (Requisito de codeudor):
+
+```{r , echo=FALSE , message=FALSE , warning=FALSE , fig.height=4}
+
+DATOS %>%
+  filter(PERIODO == "2022-10-30") %>%
+  mutate(`Meses vencidos` = `Dias vencidos`/30) %>%
+  ggplot() + 
+  aes(`Meses vencidos` , Monto , color = Codeudor) +
+  geom_jitter() +
+  geom_smooth(method = "lm" , color = "grey50") +
+  #scale_x_continuous(limits = c(0,400)) +
+  #scale_y_continuous(limits = c(0,40)) +
+  labs(x ="Altura mora (meses)" , 
+       y = "Monto" , 
+       title = "Requisito de codeudor: Altura de mora VS Monto" ,
+       subtitle = "A corte octubre de 2022") +
+  facet_wrap(~ `Codeudor` , scales = "free") +
+  stat_regline_equation(label.x = 20) +
+  theme(legend.position = "none")
+
+```
+Teniendo en cuenta la regresión, la dispersión de los datos permite determinar la relación entre variables y por tanto la tendencia entre el monto de crédito y la probabilidad de altura de mora en meses, segun se ha determinado en las siguientes funciones:
+
+#### Sin codeudor:
+
+\begin{equation}
+\text{y}_0 = \text{17 - 0.14x}
+\label{sin}
+\end{equation}
+
+#### Con codeudor
+
+\begin{equation}
+\text{y}_1 = \text{40 - 0.41x}
+\label{con}
+\end{equation}
+
+donde para ambos casos, "x" representa la variable altura de mora en meses. Siendo la altura de mora ideal máximo de 1 mes para obtener la calificación A en obligaciones de consumo, se sustituye x = 1 (un mes) en \eqref{sin} y \eqref{con}; y se determina:
+
+#### Sin codeudor: 
+
+\begin{equation}
+\text{y}_0 = \text{16.86}
+\label{sinx}
+\end{equation}
+
+#### Con codeudor
+
+\begin{equation}
+\text{y}_0 = \text{39.59}
+\label{conx}
+\end{equation}
+
+Los resultados \eqref{sinx} y \eqref{conx} ser interpretan en millones de pesos, e indican que hasta estos montos existe un buen comportamiento de pago en una solicitud de crédito para los casos donde existe o no la figura de codeudor.
+
+
+# Conclusiones
+
+ - El nivel de estudios y el tipo de ocupación de los asociados no son relevantes en el modelo general, así como tampoco un modelo univariado, por lo que de manera concluyente, no logran explicar ningún efecto sobre el default.
+ - La variable de nivel de estudios y estado civil en su conjunto categórico, no tienen efecto sobre el default, sin embargo la categoría individual de si la relación laboral es con contrato a termino indefinido y el estado civil es casado, mejoran el nivel explicativo del modelo.
+ - Patrones de comportamiento y tendencia de consumo financiero obtenidos a traves de Data Mining permite diseñar nuevos modelos financieros, con el fin de proponer proyectos encaminados a la optimizacion del portafolio de servicios financieros, asi como mejorar y perfeccionar los procesos establecidos.
+  - Mayor conocimiento del mercado a partir de ETL y la explotacion eficiente de datos, es posible la obtencion de informacion y generacion de conocimiento en el contexto de la inteligencia de negocios.
+
+
+
